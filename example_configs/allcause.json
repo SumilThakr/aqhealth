@@ -1,0 +1,15 @@
+{
+  "dataDir": "../dataDir/",
+  "popFile": "inputs/pop.shp",
+  "totalPMFile": "inputs/totalpm.shp",
+  "gemmFile": "inputs/gemm_params.csv",
+  "resultFile": "NH43modiffSTP.nc",
+  "outputDir": "test_outputs/allcause/",
+  "outputFile": "allcause_mortality.shp",
+  "shpVarName": "TotalPM25",
+  "ncVarName": "IJ_AVG_S__NH4",
+  "ncLayer": 0,
+  "outputSpec": {
+    "mode": "allcause"
+  }
+}

@@ -30,5 +30,20 @@
   "_ncVarName_description": "NetCDF variable name to read when resultFile is a NetCDF file. Only used for NetCDF inputs. Common GEOS-Chem variables include IJ_AVG_S__NH4 (ammonium), IJ_AVG_S__PM25 (total PM2.5)",
 
   "ncLayer": 0,
-  "_ncLayer_description": "Vertical layer index to extract from 3D NetCDF data. 0 = ground level (surface), 1 = first atmospheric layer, etc. Ground level (0) should be used for health impacts"
+  "_ncLayer_description": "Vertical layer index to extract from 3D NetCDF data. 0 = ground level (surface), 1 = first atmospheric layer, etc. Ground level (0) should be used for health impacts",
+
+  "outputSpec": {
+    "mode": "allcause",
+    "causes": [],
+    "ages": []
+  },
+  "_outputSpec_description": "Specifies what mortality outputs to generate. See examples below for different modes",
+  "_outputSpec_modes": {
+    "allcause": "Single output for all-cause mortality (adults 25+). No causes/ages needed. Example: {\"mode\": \"allcause\"}",
+    "5cod": "Single output summing 5 major causes (copd, lcancer, lri, ihd, str) across all age groups. No causes/ages needed. Example: {\"mode\": \"5cod\"}",
+    "individual": "Single output for specific cause and age. Requires exactly one cause and one age. Example: {\"mode\": \"individual\", \"causes\": [\"lcancer\"], \"ages\": [\"25\"]}",
+    "multiple": "Multiple output files, one per cause/age combination. Requires at least one cause and age. Example: {\"mode\": \"multiple\", \"causes\": [\"copd\", \"lcancer\", \"lri\"], \"ages\": [\"25\"]}"
+  },
+  "_available_causes": ["all", "copd", "lcancer", "lri", "ihd", "str"],
+  "_available_ages": ["25 (all adults for all/copd/lcancer/lri)", "27.5, 32.5, 37.5, 42.5, 47.5, 52.5, 57.5, 62.5, 67.5, 72.5, 77.5, 85 (age strata for ihd/str)"]
 }

@@ -21,18 +21,26 @@ const (
     pol         = "TotalPM25"
 )
 
+// OutputSpec defines what mortality outputs to generate
+type OutputSpec struct {
+    Mode   string   `json:"mode"`   // "allcause", "5cod", "individual", "multiple"
+    Causes []string `json:"causes"` // List of causes for individual/multiple mode
+    Ages   []string `json:"ages"`   // List of ages for individual/multiple mode
+}
+
 // Config holds all configuration parameters
 type Config struct {
-    DataDir     string `json:"dataDir"`
-    PopFile     string `json:"popFile"`
-    TotalPMFile string `json:"totalPMFile"`
-    GEMMFile    string `json:"gemmFile"`
-    ResultFile  string `json:"resultFile"`
-    OutputDir   string `json:"outputDir"`
-    OutputFile  string `json:"outputFile"`
-    ShpVarName  string `json:"shpVarName"`
-    NCVarName   string `json:"ncVarName"`
-    NCLayer     int    `json:"ncLayer"`
+    DataDir     string     `json:"dataDir"`
+    PopFile     string     `json:"popFile"`
+    TotalPMFile string     `json:"totalPMFile"`
+    GEMMFile    string     `json:"gemmFile"`
+    ResultFile  string     `json:"resultFile"`
+    OutputDir   string     `json:"outputDir"`
+    OutputFile  string     `json:"outputFile"`
+    ShpVarName  string     `json:"shpVarName"`
+    NCVarName   string     `json:"ncVarName"`
+    NCLayer     int        `json:"ncLayer"`
+    OutputSpec  OutputSpec `json:"outputSpec"`
 }
 
 // Default configuration values
@@ -48,6 +56,11 @@ func defaultConfig() Config {
         ShpVarName:  "TotalPM25",
         NCVarName:   "IJ_AVG_S__NH4",
         NCLayer:     0,
+        OutputSpec: OutputSpec{
+            Mode:   "allcause",
+            Causes: []string{},
+            Ages:   []string{},
+        },
     }
 }
 
@@ -142,21 +155,47 @@ func main(){
     check(err)
     gemmAllVals                 := processGEMM(gemmData)
 
-    // For testing:
-//    saveTotalDeaths("all", "25", resultpm, totpm, population, gemmAllVals, inmapCells)
-//    get5COD(gemmAllVals, inmapCells, totpm, totpm, population)
-    // 5COD
-//    get5COD(gemmAllVals, inmapCells, resultpm, totpm, population)
-    // All natural cause:
-    attrib                      := getDeaths("all", "25", resultpm, totpm, population, gemmAllVals, config)
-    writeTotDeaths(inmapCells, attrib, filepath.Join(config.OutputDir, config.OutputFile))
-    // Individual results:
-//    attrib                    := getDeaths("lcancer", "25", resultpm, totpm, population, gemmAllVals)
-//    writeTotDeaths(inmapCells, attrib, "deaths-lcancer.shp")
-//    attrib                    = getDeaths("copd", "25", resultpm, totpm, population, gemmAllVals)
-//    writeTotDeaths(inmapCells, attrib, "deaths-copd.shp")
-//    attrib                    = getDeaths("lri", "25", resultpm, totpm, population, gemmAllVals)
-//    writeTotDeaths(inmapCells, attrib, "deaths-lri.shp")
+    // Generate outputs based on outputSpec mode
+    switch config.OutputSpec.Mode {
+    case "allcause":
+        fmt.Println("Calculating all-cause mortality for adults 25+")
+        attrib := getDeaths("all", "25", resultpm, totpm, population, gemmAllVals, config)
+        writeTotDeaths(inmapCells, attrib, filepath.Join(config.OutputDir, config.OutputFile))
+
+    case "5cod":
+        fmt.Println("Calculating 5 causes of death (summed across all ages)")
+        get5COD(gemmAllVals, inmapCells, resultpm, totpm, population, config)
+
+    case "individual":
+        if len(config.OutputSpec.Causes) != 1 || len(config.OutputSpec.Ages) != 1 {
+            panic("individual mode requires exactly one cause and one age")
+        }
+        cause := config.OutputSpec.Causes[0]
+        age := config.OutputSpec.Ages[0]
+        fmt.Printf("Calculating mortality for cause=%s, age=%s\n", cause, age)
+        attrib := getDeaths(cause, age, resultpm, totpm, population, gemmAllVals, config)
+        writeTotDeaths(inmapCells, attrib, filepath.Join(config.OutputDir, config.OutputFile))
+
+    case "multiple":
+        if len(config.OutputSpec.Causes) == 0 || len(config.OutputSpec.Ages) == 0 {
+            panic("multiple mode requires at least one cause and one age")
+        }
+        fmt.Printf("Calculating mortality for %d cause(s) x %d age(s) = %d outputs\n",
+            len(config.OutputSpec.Causes), len(config.OutputSpec.Ages),
+            len(config.OutputSpec.Causes)*len(config.OutputSpec.Ages))
+
+        for _, cause := range config.OutputSpec.Causes {
+            for _, age := range config.OutputSpec.Ages {
+                fmt.Printf("  Processing: %s_%s\n", cause, age)
+                attrib := getDeaths(cause, age, resultpm, totpm, population, gemmAllVals, config)
+                outputName := fmt.Sprintf("%s_%s.shp", cause, age)
+                writeTotDeaths(inmapCells, attrib, filepath.Join(config.OutputDir, outputName))
+            }
+        }
+
+    default:
+        panic(fmt.Sprintf("Unknown output mode: %s. Valid modes: allcause, 5cod, individual, multiple", config.OutputSpec.Mode))
+    }
 }
 
 func get5COD (gemmAllVals []gemmAll, inmapCells []geom.Polygonal, resultpm, totpm, population []float64, config Config) {
