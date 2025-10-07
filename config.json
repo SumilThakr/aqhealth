@@ -32,6 +32,13 @@
   "ncLayer": 0,
   "_ncLayer_description": "Vertical layer index to extract from 3D NetCDF data. 0 = ground level (surface), 1 = first atmospheric layer, etc. Ground level (0) should be used for health impacts",
 
+  "attributionMethod": "proportional",
+  "_attributionMethod_description": "Method for attributing mortality to PM2.5 source. Options: 'proportional' or 'zeroout'",
+  "_attributionMethod_options": {
+    "proportional": "Proportional attribution: deaths = (resultpm / totpm) * total_deaths. Assigns deaths proportionally based on source contribution to total PM2.5. Default method.",
+    "zeroout": "Zero-out attribution: deaths = deaths(totpm+resultpm) - deaths(totpm). Calculates deaths that would be avoided if source were completely removed. Uses sum of concentrations and includes robust NaN handling."
+  },
+
   "outputSpec": {
     "mode": "allcause",
     "causes": [],

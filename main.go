@@ -30,32 +30,34 @@ type OutputSpec struct {
 
 // Config holds all configuration parameters
 type Config struct {
-    DataDir     string     `json:"dataDir"`
-    PopFile     string     `json:"popFile"`
-    TotalPMFile string     `json:"totalPMFile"`
-    GEMMFile    string     `json:"gemmFile"`
-    ResultFile  string     `json:"resultFile"`
-    OutputDir   string     `json:"outputDir"`
-    OutputFile  string     `json:"outputFile"`
-    ShpVarName  string     `json:"shpVarName"`
-    NCVarName   string     `json:"ncVarName"`
-    NCLayer     int        `json:"ncLayer"`
-    OutputSpec  OutputSpec `json:"outputSpec"`
+    DataDir           string     `json:"dataDir"`
+    PopFile           string     `json:"popFile"`
+    TotalPMFile       string     `json:"totalPMFile"`
+    GEMMFile          string     `json:"gemmFile"`
+    ResultFile        string     `json:"resultFile"`
+    OutputDir         string     `json:"outputDir"`
+    OutputFile        string     `json:"outputFile"`
+    ShpVarName        string     `json:"shpVarName"`
+    NCVarName         string     `json:"ncVarName"`
+    NCLayer           int        `json:"ncLayer"`
+    OutputSpec        OutputSpec `json:"outputSpec"`
+    AttributionMethod string     `json:"attributionMethod"` // "proportional" or "zeroout"
 }
 
 // Default configuration values
 func defaultConfig() Config {
     return Config{
-        DataDir:     "../dataDir/",
-        PopFile:     "inputs/pop.shp",
-        TotalPMFile: "inputs/totalpm.shp",
-        GEMMFile:    "inputs/gemm_params.csv",
-        ResultFile:  "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp",
-        OutputDir:   "output/",
-        OutputFile:  "output.shp",
-        ShpVarName:  "TotalPM25",
-        NCVarName:   "IJ_AVG_S__NH4",
-        NCLayer:     0,
+        DataDir:           "../dataDir/",
+        PopFile:           "inputs/pop.shp",
+        TotalPMFile:       "inputs/totalpm.shp",
+        GEMMFile:          "inputs/gemm_params.csv",
+        ResultFile:        "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp",
+        OutputDir:         "output/",
+        OutputFile:        "output.shp",
+        ShpVarName:        "TotalPM25",
+        NCVarName:         "IJ_AVG_S__NH4",
+        NCLayer:           0,
+        AttributionMethod: "proportional",
         OutputSpec: OutputSpec{
             Mode:   "allcause",
             Causes: []string{},
@@ -65,14 +67,15 @@ func defaultConfig() Config {
 }
 
 var (
-    configFile = flag.String("config", "", "Path to JSON configuration file (optional)")
-    resultFile = flag.String("resultFile", "", "Path to the PM2.5 result file (shapefile or NetCDF)")
-    outputDir = flag.String("outputDir", "", "Directory to save output files")
-    outputFile = flag.String("outputFile", "", "Name of the output shapefile")
-    shpVarName = flag.String("shpVarName", "", "Shapefile variable/field name to read")
-    ncVarName = flag.String("ncVarName", "", "NetCDF variable name to read")
-    ncLayer = flag.Int("ncLayer", -1, "Vertical layer index to extract from NetCDF (0 = ground level)")
-    dataDir = flag.String("dataDir", "", "Path to data directory containing inputs")
+    configFile        = flag.String("config", "", "Path to JSON configuration file (optional)")
+    resultFile        = flag.String("resultFile", "", "Path to the PM2.5 result file (shapefile or NetCDF)")
+    outputDir         = flag.String("outputDir", "", "Directory to save output files")
+    outputFile        = flag.String("outputFile", "", "Name of the output shapefile")
+    shpVarName        = flag.String("shpVarName", "", "Shapefile variable/field name to read")
+    ncVarName         = flag.String("ncVarName", "", "NetCDF variable name to read")
+    ncLayer           = flag.Int("ncLayer", -1, "Vertical layer index to extract from NetCDF (0 = ground level)")
+    dataDir           = flag.String("dataDir", "", "Path to data directory containing inputs")
+    attributionMethod = flag.String("attributionMethod", "", "Attribution method: proportional or zeroout")
 )
 
 // loadConfig loads configuration from file and applies command-line overrides
@@ -112,6 +115,14 @@ func loadConfig() Config {
     }
     if *dataDir != "" {
         config.DataDir = *dataDir
+    }
+    if *attributionMethod != "" {
+        config.AttributionMethod = *attributionMethod
+    }
+
+    // Validate attribution method
+    if config.AttributionMethod != "proportional" && config.AttributionMethod != "zeroout" {
+        panic(fmt.Sprintf("Invalid attributionMethod: %s. Must be 'proportional' or 'zeroout'", config.AttributionMethod))
     }
 
     return config
@@ -309,8 +320,20 @@ func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gem
     _, countryRegrid            := getTots(demogFile, "RRs")    // Change name
     _, allcausemort             := getTots(acmortFile, "RRs")   // Change name
     _, ijhat                    := getTots(ijhatFile, "RRs")    // Change name
-    totdeaths                   := totDeaths(totpm, resultpm, population, ijhat, countryRegrid, allcausemort, params)
-    attrib                      := attribution(totpm, totdeaths, resultpm)
+
+    // Route to appropriate attribution method
+    var attrib []float64
+    if config.AttributionMethod == "zeroout" {
+        // Zero-out methodology: deaths = totalDeaths(totpm+resultpm) - baseDeaths(totpm)
+        totdeaths := totDeathsSum(totpm, resultpm, population, ijhat, countryRegrid, allcausemort, params)
+        baseline := baseDeaths(totpm, population, ijhat, countryRegrid, allcausemort, params)
+        attrib = zeroOut(totdeaths, baseline)
+    } else {
+        // Proportional attribution (default): deaths = resultpm * totdeaths / totpm
+        totdeaths := totDeaths(totpm, resultpm, population, ijhat, countryRegrid, allcausemort, params)
+        attrib = attribution(totpm, totdeaths, resultpm)
+    }
+
     return attrib
 }
 
@@ -383,6 +406,66 @@ func getNCData(ncFile, varName string, layer int) ([]geom.Polygonal, []float64) 
 }
 
 
+// totDeathsSum calculates total deaths with sum of concentrations (totpm + resultpm)
+// Includes robust NaN and Inf handling for zero-out methodology
+func totDeathsSum(totpm, resultpm, population, ijhat, countryRegrid, allcausemort []float64, params gemmParams) (deaths []float64) {
+    for t := range totpm {
+        var concs float64
+        if math.IsNaN(totpm[t]) {
+            if math.IsNaN(resultpm[t]) {
+                concs = 0.0
+            } else {
+                concs = resultpm[t] + totpm[t]
+            }
+        } else {
+            if math.IsNaN(resultpm[t]) {
+                concs = resultpm[t] + totpm[t]
+            } else {
+                concs = resultpm[t] + totpm[t]
+            }
+        }
+        var dd float64
+        if ijhat[t] == 0 || math.IsNaN(ijhat[t]) || math.IsNaN(allcausemort[t]) || math.IsNaN(countryRegrid[t]) {
+            dd = 0.0
+        } else {
+            dd = (GEMM(concs, params.θ, params.α, params.μ, params.v) - 1) *
+                 (population[t] / ijhat[t]) * countryRegrid[t] * allcausemort[t] / 100000
+            if math.IsNaN(dd) || math.IsInf(dd, 0) {
+                dd = 0.0
+            }
+        }
+        deaths = append(deaths, dd)
+    }
+    return deaths
+}
+
+// baseDeaths calculates baseline deaths using only totpm (no resultpm)
+// Used for zero-out methodology to establish baseline scenario
+func baseDeaths(totpm, population, ijhat, countryRegrid, allcausemort []float64, params gemmParams) (deaths []float64) {
+    for t := range totpm {
+        var concs float64
+        if math.IsNaN(totpm[t]) {
+            concs = 0.0
+        } else {
+            concs = totpm[t]
+        }
+        var dd float64
+        if ijhat[t] == 0 || math.IsNaN(ijhat[t]) || math.IsNaN(allcausemort[t]) || math.IsNaN(countryRegrid[t]) {
+            dd = 0.0
+        } else {
+            dd = (GEMM(concs, params.θ, params.α, params.μ, params.v) - 1) *
+                 (population[t] / ijhat[t]) * countryRegrid[t] * allcausemort[t] / 100000
+            if math.IsNaN(dd) || math.IsInf(dd, 0) {
+                dd = 0.0
+            }
+        }
+        deaths = append(deaths, dd)
+    }
+    return deaths
+}
+
+// totDeaths calculates deaths using max concentration (for proportional attribution)
+// Original implementation for backward compatibility
 func totDeaths(totpm, resultpm, population, ijhat, countryRegrid, allcausemort []float64, params gemmParams) (deaths []float64) {
     var maxConc []float64
     for t := range totpm {
@@ -502,6 +585,29 @@ func writeTotDeaths(cells []geom.Polygonal, inputData []float64, filename string
 	e.Close()
 }
 
+// zeroOut calculates attribution using absolute difference methodology
+// Formula: deaths = totalDeaths - baselineDeaths
+// Represents deaths that would be avoided if source were removed entirely
+func zeroOut(totdeaths, baseline []float64) ([]float64) {
+    var attrib []float64
+    for t := range totdeaths {
+        var dd float64
+        if totdeaths[t] == 0.0 {
+            dd = 0.0
+        } else {
+            dd = totdeaths[t] - baseline[t]
+            if math.IsNaN(dd) {
+                dd = 0.0
+            }
+        }
+        attrib = append(attrib, dd)
+    }
+    return attrib
+}
+
+// attribution calculates proportional attribution
+// Formula: deaths = resultpm * totdeaths / totpm
+// Represents proportional contribution of source to total deaths
 func attribution(totpm, totdeaths, resultpm []float64) ([]float64) {
     var attrib []float64
     for t := range totpm {
