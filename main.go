@@ -7,6 +7,8 @@ import (
     "path/filepath"
     "strings"
     "flag"
+    "encoding/json"
+    "io/ioutil"
     "github.com/ctessum/geom/index/rtree"
 	"github.com/ctessum/geom"
 	"github.com/ctessum/geom/encoding/shp"
@@ -16,45 +18,117 @@ import (
 )
 
 const (
-    dataDir     = "../dataDir/"
-    popF     = "inputs/pop.shp"
-    totalPM      = "inputs/totalpm.shp"
     pol         = "TotalPM25"
-    gemmFile    = "inputs/gemm_params.csv"
-    // if reading NetCDF inputs:
-	layer   = 0
-	varName = "PM25"
-	lats    = 91
-	lons    = 144
 )
+
+// Config holds all configuration parameters
+type Config struct {
+    DataDir     string `json:"dataDir"`
+    PopFile     string `json:"popFile"`
+    TotalPMFile string `json:"totalPMFile"`
+    GEMMFile    string `json:"gemmFile"`
+    ResultFile  string `json:"resultFile"`
+    OutputDir   string `json:"outputDir"`
+    OutputFile  string `json:"outputFile"`
+    NCVarName   string `json:"ncVarName"`
+    NCLayer     int    `json:"ncLayer"`
+}
+
+// Default configuration values
+func defaultConfig() Config {
+    return Config{
+        DataDir:     "../dataDir/",
+        PopFile:     "inputs/pop.shp",
+        TotalPMFile: "inputs/totalpm.shp",
+        GEMMFile:    "inputs/gemm_params.csv",
+        ResultFile:  "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp",
+        OutputDir:   "output/",
+        OutputFile:  "output.shp",
+        NCVarName:   "IJ_AVG_S__NH4",
+        NCLayer:     0,
+    }
+}
 
 var (
-    resultFile = flag.String("resultFile", "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp", "Path to the PM2.5 result file (shapefile)")
-    ncFile = flag.String("ncFile", "/Users/sumilthakrar/UMN/Projects/GlobalAg/livestock/GEOS-Chem/difference.nc", "Path to NetCDF file (if using NetCDF input)")
-    outputDir = flag.String("outputDir", "output/", "Directory to save output files")
-    outputFile = flag.String("outputFile", "output.shp", "Name of the output shapefile")
+    configFile = flag.String("config", "", "Path to JSON configuration file (optional)")
+    resultFile = flag.String("resultFile", "", "Path to the PM2.5 result file (shapefile or NetCDF)")
+    outputDir = flag.String("outputDir", "", "Directory to save output files")
+    outputFile = flag.String("outputFile", "", "Name of the output shapefile")
+    ncVarName = flag.String("ncVarName", "", "NetCDF variable name to read")
+    ncLayer = flag.Int("ncLayer", -1, "Vertical layer index to extract from NetCDF (0 = ground level)")
+    dataDir = flag.String("dataDir", "", "Path to data directory containing inputs")
 )
 
-func main(){
+// loadConfig loads configuration from file and applies command-line overrides
+func loadConfig() Config {
     flag.Parse()
 
+    // Start with defaults
+    config := defaultConfig()
+
+    // Load from config file if provided
+    if *configFile != "" {
+        fmt.Printf("Loading configuration from %s\n", *configFile)
+        data, err := ioutil.ReadFile(*configFile)
+        check(err)
+        err = json.Unmarshal(data, &config)
+        check(err)
+    }
+
+    // Override with command-line flags (if provided)
+    if *resultFile != "" {
+        config.ResultFile = *resultFile
+    }
+    if *outputDir != "" {
+        config.OutputDir = *outputDir
+    }
+    if *outputFile != "" {
+        config.OutputFile = *outputFile
+    }
+    if *ncVarName != "" {
+        config.NCVarName = *ncVarName
+    }
+    if *ncLayer != -1 {
+        config.NCLayer = *ncLayer
+    }
+    if *dataDir != "" {
+        config.DataDir = *dataDir
+    }
+
+    return config
+}
+
+func main(){
+    config := loadConfig()
+
     // Create output directory if it doesn't exist
-    if err := os.MkdirAll(*outputDir, 0755); err != nil {
+    if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
         check(err)
     }
 
     fmt.Println("reading inputs")
 // Getting file paths
-    inmapCells, totpm           := getTots(filepath.Join(dataDir, totalPM), "TotalPM25")
-    oldCells, resultpmgrid      := getTots(*resultFile, "TotalPM25")
-    // Normally it's this one, but I've changed it for ASEAN
-//    oldCells, resultpmgrid      := getShpData(*resultFile, "TotalPM25")
+    inmapCells, totpm           := getTots(filepath.Join(config.DataDir, config.TotalPMFile), "TotalPM25")
+
+    // Determine if input is NetCDF or shapefile based on extension
+    var oldCells []geom.Polygonal
+    var resultpmgrid []float64
+
+    if strings.HasSuffix(strings.ToLower(config.ResultFile), ".nc") {
+        fmt.Println("Reading NetCDF input file...")
+        oldCells, resultpmgrid = getNCData(config.ResultFile, config.NCVarName, config.NCLayer)
+    } else {
+        fmt.Println("Reading shapefile input...")
+        oldCells, resultpmgrid = getTots(config.ResultFile, "TotalPM25")
+        // Normally it's this one, but I've changed it for ASEAN
+//        oldCells, resultpmgrid = getShpData(config.ResultFile, "TotalPM25")
+    }
     resultpm, err               := regridMean(oldCells, inmapCells, resultpmgrid)
     check(err)
-    _, population               := getShpData(filepath.Join(dataDir, popF), "TotalPop")
+    _, population               := getShpData(filepath.Join(config.DataDir, config.PopFile), "TotalPop")
 
     // Process GEMM params
-    f, err                      := os.Open(filepath.Join(dataDir, gemmFile))
+    f, err                      := os.Open(filepath.Join(config.DataDir, config.GEMMFile))
     check(err)
     defer f.Close()
     csvReader                   := csv.NewReader(f)
@@ -68,8 +142,8 @@ func main(){
     // 5COD
 //    get5COD(gemmAllVals, inmapCells, resultpm, totpm, population)
     // All natural cause:
-    attrib                      := getDeaths("all", "25", resultpm, totpm, population, gemmAllVals)
-    writeTotDeaths(inmapCells, attrib, filepath.Join(*outputDir, *outputFile))
+    attrib                      := getDeaths("all", "25", resultpm, totpm, population, gemmAllVals, config)
+    writeTotDeaths(inmapCells, attrib, filepath.Join(config.OutputDir, config.OutputFile))
     // Individual results:
 //    attrib                    := getDeaths("lcancer", "25", resultpm, totpm, population, gemmAllVals)
 //    writeTotDeaths(inmapCells, attrib, "deaths-lcancer.shp")
@@ -79,7 +153,7 @@ func main(){
 //    writeTotDeaths(inmapCells, attrib, "deaths-lri.shp")
 }
 
-func get5COD (gemmAllVals []gemmAll, inmapCells []geom.Polygonal, resultpm, totpm, population []float64) {
+func get5COD (gemmAllVals []gemmAll, inmapCells []geom.Polygonal, resultpm, totpm, population []float64, config Config) {
     totAttrib := make([]float64, len(inmapCells))
     for _, c := range gemmAllVals {
 //      Baseline mortality rates aren't saved out for IHD and STR for people aged 25+
@@ -90,11 +164,11 @@ func get5COD (gemmAllVals []gemmAll, inmapCells []geom.Polygonal, resultpm, totp
             continue
         }
         fmt.Println(c.gk.cod, c.gk.age)
-        sl          := getDeaths(c.gk.cod, c.gk.age, resultpm, totpm, population, gemmAllVals)
+        sl          := getDeaths(c.gk.cod, c.gk.age, resultpm, totpm, population, gemmAllVals, config)
         totAttrib   = sumSlices(sl,totAttrib)
     }
     fmt.Println("writing total deaths to file")
-    writeTotDeaths(inmapCells, totAttrib, filepath.Join(*outputDir, *outputFile))
+    writeTotDeaths(inmapCells, totAttrib, filepath.Join(config.OutputDir, config.OutputFile))
 }
 
 func sumSlices(x, y []float64) ([]float64) {
@@ -156,7 +230,7 @@ func processGEMM(data [][]string) []gemmAll {
     return gpAll
 }
 
-func saveTotalDeaths(cause, age string, resultpm, totpm, population []float64, g []gemmAll, inmapCells []geom.Polygonal) {
+func saveTotalDeaths(cause, age string, resultpm, totpm, population []float64, g []gemmAll, inmapCells []geom.Polygonal, config Config) {
     var demogFile, acmortFile, ijhatFile string
     var params gemmParams
     m := make(map[gemmKey]gemmParams)
@@ -164,9 +238,9 @@ func saveTotalDeaths(cause, age string, resultpm, totpm, population []float64, g
         m[line.gk] = line.gp
     }
     params                  = m[gemmKey{cause,age}]
-    demogFile               = filepath.Join(dataDir, "inputs","age"+age+".shp")
-    acmortFile              = filepath.Join(dataDir, "basemorts",cause+age+".shp")
-    ijhatFile               = filepath.Join(dataDir, "ijhats",cause+"_"+age+".shp")
+    demogFile               = filepath.Join(config.DataDir, "inputs","age"+age+".shp")
+    acmortFile              = filepath.Join(config.DataDir, "basemorts",cause+age+".shp")
+    ijhatFile               = filepath.Join(config.DataDir, "ijhats",cause+"_"+age+".shp")
 
     _, countryRegrid            := getTots(demogFile, "RRs")    // Change name
     _, allcausemort             := getTots(acmortFile, "RRs")   // Change name
@@ -175,7 +249,7 @@ func saveTotalDeaths(cause, age string, resultpm, totpm, population []float64, g
     writeTotDeaths(inmapCells, totdeaths, "deaths-totals.shp")
 }
 
-func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gemmAll) []float64 {
+func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gemmAll, config Config) []float64 {
     var demogFile, acmortFile, ijhatFile string
     var params gemmParams
     m := make(map[gemmKey]gemmParams)
@@ -183,9 +257,9 @@ func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gem
         m[line.gk] = line.gp
     }
     params                  = m[gemmKey{cause,age}]
-    demogFile               = filepath.Join(dataDir, "inputs","age"+age+".shp")
-    acmortFile              = filepath.Join(dataDir, "basemorts",cause+age+".shp")
-    ijhatFile               = filepath.Join(dataDir, "ijhats", cause+"_"+age+".shp")
+    demogFile               = filepath.Join(config.DataDir, "inputs","age"+age+".shp")
+    acmortFile              = filepath.Join(config.DataDir, "basemorts",cause+age+".shp")
+    ijhatFile               = filepath.Join(config.DataDir, "ijhats", cause+"_"+age+".shp")
 
     _, countryRegrid            := getTots(demogFile, "RRs")    // Change name
     _, allcausemort             := getTots(acmortFile, "RRs")   // Change name
@@ -195,29 +269,53 @@ func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gem
     return attrib
 }
 
-func getNCData() ([]geom.Polygonal, []float64) {
-	ds, err := netcdf.OpenFile(*ncFile, netcdf.NOWRITE)
+func getNCData(ncFile, varName string, layer int) ([]geom.Polygonal, []float64) {
+	ds, err := netcdf.OpenFile(ncFile, netcdf.NOWRITE)
 	check(err)
+	defer ds.Close()
 
+	// Get dimensions
 	latVar, err := ds.Var("lat")
 	check(err)
+	lats64, err := latVar.Len()
+	check(err)
+	lats := int(lats64)
 	lat := make([]float32, lats)
 	check(latVar.ReadFloat32s(lat))
 	dy := lat[5] - lat[4] // Assume regular grid, first grid cell may be weird.
-//	fmt.Println("dy =", dy)
 
 	lonVar, err := ds.Var("lon")
 	check(err)
+	lons64, err := lonVar.Len()
+	check(err)
+	lons := int(lons64)
 	lon := make([]float32, lons)
 	check(lonVar.ReadFloat32s(lon))
 	dx := lon[5] - lon[4] // Assume regular grid, first grid cell may be weird.
-//	fmt.Println("dx =", dx)
 
+	// Read the variable
 	v, err := ds.Var(varName)
 	check(err)
-	ncData := make([]float64, lats*lons)
-	check(v.ReadFloat64Slice(ncData, []uint64{0, 0}, []uint64{lats, lons}))
 
+	// Check if variable is 2D or 3D by checking number of dimensions
+	ndims, err := v.NAttrs()
+	check(err)
+
+	var ncData []float64
+
+	// For 3D data (lev, lat, lon), extract single layer at ground level
+	// We read a slice at the specified layer index
+	if layer >= 0 {
+		// 3D data - read single layer slice
+		ncData = make([]float64, lats*lons)
+		// ReadFloat64Slice expects (data, start indices, count)
+		check(v.ReadFloat64Slice(ncData, []uint64{uint64(layer), 0, 0}, []uint64{1, uint64(lats), uint64(lons)}))
+	} else {
+		// This shouldn't happen with default layer=0, but kept for safety
+		panic(fmt.Sprintf("Invalid layer index: %d", layer))
+	}
+
+	// Create grid cells
 	gcCells := make([]geom.Polygonal, 0, len(ncData))
 	for j := 0; j < lats; j++ {
 		for i := 0; i < lons; i++ {
@@ -227,10 +325,15 @@ func getNCData() ([]geom.Polygonal, []float64) {
 			})
 		}
 	}
+
 	gcVals := make([]float64, len(ncData))
 	for i, v := range ncData {
 		gcVals[i] = float64(v)
 	}
+
+	// Suppress unused variable warning
+	_ = ndims
+
 	return gcCells, gcVals
 }
 

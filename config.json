@@ -1,0 +1,31 @@
+{
+  "_comment": "Configuration file for aqhealth mortality estimation tool",
+  "_usage": "Run with: ./aqhealth --config config.json",
+
+  "dataDir": "../dataDir/",
+  "_dataDir_description": "Path to the directory containing all input data files (population, baseline mortality, GEMM parameters, etc.)",
+
+  "popFile": "inputs/pop.shp",
+  "_popFile_description": "Relative path (within dataDir) to population shapefile",
+
+  "totalPMFile": "inputs/totalpm.shp",
+  "_totalPMFile_description": "Relative path (within dataDir) to total PM2.5 concentration baseline shapefile",
+
+  "gemmFile": "inputs/gemm_params.csv",
+  "_gemmFile_description": "Relative path (within dataDir) to GEMM (Global Exposure Mortality Model) parameters CSV file",
+
+  "resultFile": "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp",
+  "_resultFile_description": "Full path to the PM2.5 result file from air quality model. Can be shapefile (.shp) or NetCDF (.nc). For NetCDF files, only ground-level concentrations are extracted by default",
+
+  "outputDir": "output/",
+  "_outputDir_description": "Directory where output shapefiles will be saved. Will be created if it doesn't exist",
+
+  "outputFile": "output.shp",
+  "_outputFile_description": "Name of the output shapefile (will be saved in outputDir). Contains calculated mortality estimates",
+
+  "ncVarName": "IJ_AVG_S__NH4",
+  "_ncVarName_description": "NetCDF variable name to read when resultFile is a NetCDF file. Only used for NetCDF inputs. Common GEOS-Chem variables include IJ_AVG_S__NH4 (ammonium), IJ_AVG_S__PM25 (total PM2.5)",
+
+  "ncLayer": 0,
+  "_ncLayer_description": "Vertical layer index to extract from 3D NetCDF data. 0 = ground level (surface), 1 = first atmospheric layer, etc. Ground level (0) should be used for health impacts"
+}
