@@ -6,6 +6,7 @@ import (
 	"strconv"
     "path/filepath"
     "strings"
+    "flag"
     "github.com/ctessum/geom/index/rtree"
 	"github.com/ctessum/geom"
 	"github.com/ctessum/geom/encoding/shp"
@@ -15,28 +16,39 @@ import (
 )
 
 const (
-    dataDir     = "../../mortality"
+    dataDir     = "../dataDir/"
     popF     = "inputs/pop.shp"
     totalPM      = "inputs/totalpm.shp"
     pol         = "TotalPM25"
-    resultFile = "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp"
     gemmFile    = "inputs/gemm_params.csv"
-    outputFile = "output.shp"
     // if reading NetCDF inputs:
-	ncFile  =  "/Users/sumilthakrar/UMN/Projects/GlobalAg/livestock/GEOS-Chem/difference.nc"
 	layer   = 0
 	varName = "PM25"
 	lats    = 91
 	lons    = 144
 )
 
+var (
+    resultFile = flag.String("resultFile", "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp", "Path to the PM2.5 result file (shapefile)")
+    ncFile = flag.String("ncFile", "/Users/sumilthakrar/UMN/Projects/GlobalAg/livestock/GEOS-Chem/difference.nc", "Path to NetCDF file (if using NetCDF input)")
+    outputDir = flag.String("outputDir", "output/", "Directory to save output files")
+    outputFile = flag.String("outputFile", "output.shp", "Name of the output shapefile")
+)
+
 func main(){
+    flag.Parse()
+
+    // Create output directory if it doesn't exist
+    if err := os.MkdirAll(*outputDir, 0755); err != nil {
+        check(err)
+    }
+
     fmt.Println("reading inputs")
 // Getting file paths
     inmapCells, totpm           := getTots(filepath.Join(dataDir, totalPM), "TotalPM25")
-    oldCells, resultpmgrid      := getTots(resultFile, "TotalPM25")
+    oldCells, resultpmgrid      := getTots(*resultFile, "TotalPM25")
     // Normally it's this one, but I've changed it for ASEAN
-//    oldCells, resultpmgrid      := getShpData(resultFile, "TotalPM25")
+//    oldCells, resultpmgrid      := getShpData(*resultFile, "TotalPM25")
     resultpm, err               := regridMean(oldCells, inmapCells, resultpmgrid)
     check(err)
     _, population               := getShpData(filepath.Join(dataDir, popF), "TotalPop")
@@ -57,7 +69,7 @@ func main(){
 //    get5COD(gemmAllVals, inmapCells, resultpm, totpm, population)
     // All natural cause:
     attrib                      := getDeaths("all", "25", resultpm, totpm, population, gemmAllVals)
-    writeTotDeaths(inmapCells, attrib, outputFile)
+    writeTotDeaths(inmapCells, attrib, filepath.Join(*outputDir, *outputFile))
     // Individual results:
 //    attrib                    := getDeaths("lcancer", "25", resultpm, totpm, population, gemmAllVals)
 //    writeTotDeaths(inmapCells, attrib, "deaths-lcancer.shp")
@@ -82,7 +94,7 @@ func get5COD (gemmAllVals []gemmAll, inmapCells []geom.Polygonal, resultpm, totp
         totAttrib   = sumSlices(sl,totAttrib)
     }
     fmt.Println("writing total deaths to file")
-    writeTotDeaths(inmapCells, totAttrib, outputFile)
+    writeTotDeaths(inmapCells, totAttrib, filepath.Join(*outputDir, *outputFile))
 }
 
 func sumSlices(x, y []float64) ([]float64) {
@@ -184,7 +196,7 @@ func getDeaths(cause, age string, resultpm, totpm, population []float64, g []gem
 }
 
 func getNCData() ([]geom.Polygonal, []float64) {
-	ds, err := netcdf.OpenFile(ncFile, netcdf.NOWRITE)
+	ds, err := netcdf.OpenFile(*ncFile, netcdf.NOWRITE)
 	check(err)
 
 	latVar, err := ds.Var("lat")
