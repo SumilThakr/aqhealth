@@ -23,6 +23,9 @@
   "outputFile": "output.shp",
   "_outputFile_description": "Name of the output shapefile (will be saved in outputDir). Contains calculated mortality estimates",
 
+  "shpVarName": "TotalPM25",
+  "_shpVarName_description": "Shapefile field/attribute name to read when resultFile is a shapefile. Default is 'TotalPM25'. Only used for shapefile inputs",
+
   "ncVarName": "IJ_AVG_S__NH4",
   "_ncVarName_description": "NetCDF variable name to read when resultFile is a NetCDF file. Only used for NetCDF inputs. Common GEOS-Chem variables include IJ_AVG_S__NH4 (ammonium), IJ_AVG_S__PM25 (total PM2.5)",
 

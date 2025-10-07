@@ -30,6 +30,7 @@ type Config struct {
     ResultFile  string `json:"resultFile"`
     OutputDir   string `json:"outputDir"`
     OutputFile  string `json:"outputFile"`
+    ShpVarName  string `json:"shpVarName"`
     NCVarName   string `json:"ncVarName"`
     NCLayer     int    `json:"ncLayer"`
 }
@@ -44,6 +45,7 @@ func defaultConfig() Config {
         ResultFile:  "/Users/sumilthakrar/UMN/Projects/GlobalAg/cropnh3/results/nh3manure/inmap_output.shp",
         OutputDir:   "output/",
         OutputFile:  "output.shp",
+        ShpVarName:  "TotalPM25",
         NCVarName:   "IJ_AVG_S__NH4",
         NCLayer:     0,
     }
@@ -54,6 +56,7 @@ var (
     resultFile = flag.String("resultFile", "", "Path to the PM2.5 result file (shapefile or NetCDF)")
     outputDir = flag.String("outputDir", "", "Directory to save output files")
     outputFile = flag.String("outputFile", "", "Name of the output shapefile")
+    shpVarName = flag.String("shpVarName", "", "Shapefile variable/field name to read")
     ncVarName = flag.String("ncVarName", "", "NetCDF variable name to read")
     ncLayer = flag.Int("ncLayer", -1, "Vertical layer index to extract from NetCDF (0 = ground level)")
     dataDir = flag.String("dataDir", "", "Path to data directory containing inputs")
@@ -84,6 +87,9 @@ func loadConfig() Config {
     }
     if *outputFile != "" {
         config.OutputFile = *outputFile
+    }
+    if *shpVarName != "" {
+        config.ShpVarName = *shpVarName
     }
     if *ncVarName != "" {
         config.NCVarName = *ncVarName
@@ -119,9 +125,9 @@ func main(){
         oldCells, resultpmgrid = getNCData(config.ResultFile, config.NCVarName, config.NCLayer)
     } else {
         fmt.Println("Reading shapefile input...")
-        oldCells, resultpmgrid = getTots(config.ResultFile, "TotalPM25")
+        oldCells, resultpmgrid = getTots(config.ResultFile, config.ShpVarName)
         // Normally it's this one, but I've changed it for ASEAN
-//        oldCells, resultpmgrid = getShpData(config.ResultFile, "TotalPM25")
+//        oldCells, resultpmgrid = getShpData(config.ResultFile, config.ShpVarName)
     }
     resultpm, err               := regridMean(oldCells, inmapCells, resultpmgrid)
     check(err)
